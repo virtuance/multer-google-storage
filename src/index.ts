@@ -3,7 +3,9 @@ import * as Storage from '@google-cloud/storage';
 import { Bucket, ConfigurationObject } from '@google-cloud/storage';
 import * as uuid from 'uuid/v1';
 import { Request } from 'express';
-const storage: (options?:ConfigurationObject)=>Storage = require('@google-cloud/storage');
+import ffmpeg from 'fluent-ffmpeg';
+
+const storage: (options?: ConfigurationObject) => Storage = require('@google-cloud/storage');
 
 export default class MulterGoogleCloudStorage implements multer.StorageEngine {
 
@@ -12,18 +14,18 @@ export default class MulterGoogleCloudStorage implements multer.StorageEngine {
 	private options: ConfigurationObject & { acl?: string, bucket?: string, contentType?: ContentTypeFunction };
 
 	getFilename(req, file, cb) {
-    	cb(null,`${uuid()}_${file.originalname}`);
+		cb(null, `${uuid()}_${file.originalname}`);
 	}
-	getDestination( req, file, cb ) {
-		cb( null, '' );
+	getDestination(req, file, cb) {
+		cb(null, '');
 	}
 
 	public getContentType: ContentTypeFunction = (req, file) => {
 		return undefined;
 	}
 
-	constructor(opts?: ConfigurationObject & { filename?: any, bucket?:string, contentType?: ContentTypeFunction }) {
-		 opts = opts || {};
+	constructor(opts?: ConfigurationObject & { filename?: any, bucket?: string, contentType?: ContentTypeFunction }) {
+		opts = opts || {};
 
 		this.getFilename = (opts.filename || this.getFilename);
 		this.getContentType = (opts.contentType || this.getContentType);
@@ -74,28 +76,32 @@ export default class MulterGoogleCloudStorage implements multer.StorageEngine {
 				const contentType = this.getContentType(req, file);
 
 				if (contentType) {
-				  streamOpts.metadata = {contentType};
+					streamOpts.metadata = { contentType };
 				}
-
-				file.stream.pipe(
-					gcFile.createWriteStream(streamOpts))
+				const stream = gcFile.createWriteStream(streamOpts);
+				file.stream.pipe(stream)
+					.on('data', (data) => {
+						ffmpeg(data)
+							.format('mp4')
+							.output(stream);
+					})
 					.on('error', (err) => cb(err))
 					.on('finish', (file) => cb(null, {
-							path: `https://${this.options.bucket}.storage.googleapis.com/${filename}`,
-							filename: filename
-						})
+						path: `https://${this.options.bucket}.storage.googleapis.com/${filename}`,
+						filename: filename
+					})
 					);
 			});
 
 		});
 	}
-	_removeFile =  (req, file, cb) => {
+	_removeFile = (req, file, cb) => {
 		var gcFile = this.gcsBucket.file(file.filename);
 		gcFile.delete();
 	};
 }
 
-export function storageEngine(opts?: ConfigurationObject & { filename?: any, bucket?:string }){
+export function storageEngine(opts?: ConfigurationObject & { filename?: any, bucket?: string }) {
 
 	return new MulterGoogleCloudStorage(opts);
 }
